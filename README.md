@@ -1,4 +1,2 @@
-# rp2040-freertos-template
-This is a template project for developing FreeRTOS based applications on Raspberry Pi RP2040 based boards. This template uses the "official" RP2040 port from the Raspberry Pi Foundation. My previous repo used the generic Cortex M0 port so this one corrects that. Previous Repo retained as tutorials rely on it. 
-
-Unmodified, this project will spawn a single task to rapidly blink the LED on and off.
+# RoboWheels
+This Project will control up to 4 DC servomotors on a robot platform.  The code runs on an RPI pico and uses PWM to perform Speed control of DC motors.  The Pico PIO blocks are used to monitor Quadrature  encoders for motor Speed and position sensing.  Closed loop Velocity control is performed on each motor with Pairs velocity locked to each other for electronic differential mode.  This make the platfor Track straight when 2 motors are determining direction.
