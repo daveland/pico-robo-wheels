@@ -3,11 +3,27 @@
 #include "queue.h"
 #include <stdio.h>
 #include "pico/stdlib.h"
+// Core 0 is managed by Freertos.  
+
+
+// core 0 starts Core 1 slave running before starting  RTOS Kernel.
+
+// Core 1 is used as a slave and I NOT managed by FreeRTOS
+// Core 1 runs the Quadrature encoders and manages position
+// Core 1 runs the PWM for the 2 motors L+R
+#include "pico/multicore.h"
+
+#include "hardware/pwm.h" // Hardware PWM
+#include "hardware/timer.h" // Timer hardware
+
 
 
 QueueHandle_t charQueue; // charachters are buffered here
 
 QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
+
+
+
 
 void led_task()
 {   int i=0;
@@ -38,26 +54,26 @@ char ch;
         chint= getchar_timeout_us(0);
         if (chint != PICO_ERROR_TIMEOUT) {
             ch=(char)chint;
-            printf("A-CH usbread %d \n",ch);
+            //printf("A-CH usbread %d \n",ch);
             int pflag=pdFALSE;
             while(!pflag){
-            printf("A-CH Charque add %d \n",ch);
+            //printf("A-CH Charque add %d \n",ch);
               pflag=  xQueueSendToBack(charQueue,& ch,0); // if fails retry char 
-              printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+             // printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
 
                  vTaskDelay(1); //delay 1ms
             }
              pflag=pdFALSE;
 
-            printf("USBchar val %d Sent\n",(int) ch);
+            //printf("USBchar val %d Sent\n",(int) ch);
             if (ch==0xd)  {
-                 printf("A- add cmdqueue %d \n",ch);
+                // printf("A- add cmdqueue %d \n",ch);
               pflag = xQueueSendToBack(cmdQueue,& ch,0); // if it fails retry.
-              printf("A- pflag %d \n", pflag);
-               printf("A-cmdQueue length %d \n", uxQueueMessagesWaiting(cmdQueue));
+             // printf("A- pflag %d \n", pflag);
+             //  printf("A-cmdQueue length %d \n", uxQueueMessagesWaiting(cmdQueue));
                 vTaskDelay(1); //delay 1ms
-               printf("A-cmdQueue length %d \n", uxQueueMessagesWaiting(cmdQueue));
-               printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+             //  printf("A-cmdQueue length %d \n", uxQueueMessagesWaiting(cmdQueue));
+             //  printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
             }
 
 
@@ -85,23 +101,23 @@ char ch;
 char cmdbuff[33];
 char * buffp;
 int i =0;
-printf("parse cmd\n");
-printf("B-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+//printf("parse cmd\n");
+//printf("B-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
 ch=0;
 
 while ((ch != 13) && (i < 32)) {
   if(  xQueueReceive( charQueue, &( ch ), ( TickType_t ) 0 ) == pdPASS) {
-    printf ("ParseCmd char %d\n",ch);
+   // printf ("ParseCmd char %d\n",ch);
     cmdbuff[i++] = ch;
-    printf("C-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+   // printf("C-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
   }
 }
 
 cmdbuff[i]=0; //add temintating null
-printf("cmd buff read");
-printf("Length %d chars",i);
-printf("cmdbuff=%s\n",cmdbuff);
-printf("CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+//printf("cmd buff read");
+//printf("Length %d chars",i);
+//printf("cmdbuff=%s\n",cmdbuff);
+//printf("CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
 // POS
 if (cmdbuff[0]=='P' && cmdbuff[1]=='?' ) {
   printf("Position cmd P? received",cmdbuff);
@@ -133,9 +149,9 @@ char ch ;
               //printf("Z-cmdQueue length %d \n", uxQueueMessagesWaiting(cmdQueue));
        if (cmdint==pdTRUE){
         if (cmd == 0x0d) 
-        { printf("Z-cmd %d RCVD\n",cmd);
+        { //printf("Z-cmd %d RCVD\n",cmd);
             parsecmd(); //parse and execute cmd
-            printf("Z-cmd parsed\n");
+           // printf("Z-cmd parsed\n");
         }
        }
         
