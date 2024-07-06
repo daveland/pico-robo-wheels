@@ -1,8 +1,25 @@
+/** pico-robo-wheels
+ * Copyright (C) {David L. Anderson} - All Rights Reserved
+ * 
+ * This source code is protected under international copyright law.  All rights
+ * reserved and protected by the copyright holders.
+ * This file is confidential and only available to authorized individuals with the
+ * permission of the copyright holders.  If you encounter this file and do not have
+ * permission, please contact the copyright holders and delete this file.
+ */
+
+
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
 #include <stdio.h>
 #include "pico/stdlib.h"
+
+
+#include "pico-robo-wheels.pio.h"
+
+
 // Core 0 is managed by Freertos.  
 
 
@@ -15,12 +32,204 @@
 
 #include "hardware/pwm.h" // Hardware PWM
 #include "hardware/timer.h" // Timer hardware
+#include "hardware/flash.h"
+#include "hardware/irq.h"
+#include "hardware/pio.h"
 
+
+#include "pico-robo-wheels.pio.h"
+
+// define Motor pwm pins to output pwm and direction for each motor
+const uint LeftPwmPin =1;  // dio pin 1 
+const uint LeftDirPin =2;
+const uint RightPwmPin =8;  // dio pin 2
+const uint RightDirPin =9;
+
+// define Encoder AB input pins
+const int LeftEncA =3; //Pio0
+const int LeftEncB =4;
+const int RightEncA =5; //Pio1
+const int RightEncB =6;
+
+// Position is 64 bits
+long LeftPosition ;
+long RightPosition ; 
 
 
 QueueHandle_t charQueue; // charachters are buffered here
 
 QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
+
+char FlashIdPtr[7];  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
+
+static void Left_pio_irq_handler (void) {
+         // test Which IRQ was raised by state machine on PIO0 sm1
+         // Left encoder is serviced by SM0 With SM flags 
+        if (pio0_hw->irq & 0)
+        {
+            LeftPosition -=1;
+        }
+        // test if irq 1 was raised
+        if (pio0_hw->irq & 2)
+        {
+            LeftPosition +=1;
+        }
+        // clear both interrupts by setting to 1
+        pio0_hw->irq = 3;
+}
+
+static void Right_pio_irq_handler (void) {
+     // test Which IRQ was raised by state machine on PIO sm0
+        if (pio0_hw->irq & 1)
+        {
+            RightPosition -=1;
+        }
+        // test if irq 1 was raised
+        if (pio0_hw->irq & 3)
+        {
+            RightPosition +=1;
+        }
+        // clear both interrupts by setting to 1
+        pio1_hw->irq = 3;
+
+}
+
+
+// setup pio0  to do the left motor encoder
+void setupPioLeft( )  {
+   // pio 0 is used
+        PIO pio = pio0;
+        // state machine 0
+        uint8_t sm = 0;
+        // configure the used pins as input with pull up
+        pio_gpio_init(pio, LeftEncA);
+        gpio_set_pulls(LeftEncA, true, false);
+        pio_gpio_init(pio, LeftEncB);
+        gpio_set_pulls(LeftEncB, true, false);
+        // load the pio program into the pio memory
+        uint offset = pio_add_program(pio, &pico_robo_wheels_program);
+        // make a sm config
+        pio_sm_config c = pico_robo_wheels_program_get_default_config(offset);
+        // set the 'in' pins
+        sm_config_set_in_pins(&c, LeftEncA);
+        // set shift to left: bits shifted by 'in' enter at the least
+        // significant bit (LSB), no autopush
+        sm_config_set_in_shift(&c, false, false, 0);
+        // set the IRQ handler
+        irq_set_exclusive_handler(PIO0_IRQ_0, Left_pio_irq_handler);
+        // enable the IRQ
+        irq_set_enabled(PIO0_IRQ_0, true);
+        pio0_hw->inte0 = PIO_IRQ0_INTE_SM0_BITS | PIO_IRQ0_INTE_SM1_BITS;
+        // init the sm.
+        // Note: the program starts after the jump table -> initial_pc = 16
+        pio_sm_init(pio, sm, 16, &c);
+        // enable the sm
+        pio_sm_set_enabled(pio, sm, true);
+    }
+
+
+// setup pio0  to do the Right motor encoder
+void setupPioRight( )  {
+   // pio 0 is used
+        PIO pio = pio1;
+        // state machine 1
+        uint8_t sm = 0;
+        // configure the used pins as input with pull up
+        pio_gpio_init(pio, RightEncA);
+        gpio_set_pulls(RightDirPin, true, false);
+        pio_gpio_init(pio, RightDirPin);
+        gpio_set_pulls(RightDirPin, true, false);
+        // load the pio program into the pio memory
+        uint offset = pio_add_program(pio, &pico_robo_wheels_program);
+        // make a sm config
+        pio_sm_config c = pico_robo_wheels_program_get_default_config(offset);
+        // set the 'in' pins
+        sm_config_set_in_pins(&c, RightDirPin);
+        // set shift to left: bits shifted by 'in' enter at the least
+        // significant bit (LSB), no autopush
+        sm_config_set_in_shift(&c, false, false, 0);
+        // set the IRQ handler
+        irq_set_exclusive_handler(PIO1_IRQ_0, Right_pio_irq_handler);
+        // enable the IRQ
+        irq_set_enabled(PIO1_IRQ_0, true);
+        pio1_hw->inte0 = PIO_IRQ0_INTE_SM0_BITS | PIO_IRQ0_INTE_SM1_BITS;
+        // init the sm.
+        // Note: the program starts after the jump table -> initial_pc = 16
+        pio_sm_init(pio, sm, 16, &c);
+        // enable the sm
+        pio_sm_set_enabled(pio, sm, true);
+    }
+
+
+
+
+
+// core 1 code here --- not managed by RTOS !!!
+void core1_entry() {
+   //toggle GPIO #1 to show core 0 is running
+
+// run core 1 for
+// PWM Generators for Motor control
+// direction stop start control
+// keep position of each wheel
+// using Quadrature Encoders for motor position ( PIO inpput buffers and counting code)
+// Velocty calulation for each motor
+// virtual transmission locking Left and right speeds together
+// Acceleration/decelleration control
+
+
+setupPioLeft();
+SetupPioRight();
+
+
+
+flash_get_unique_id(FlashIdPtr); // used as sofware key
+
+// setup PWM Pin I/O
+gpio_set_dir(LeftPwmPin,true);
+gpio_set_dir(LeftDirPin,true);
+gpio_set_dir(RightPwmPin,true);
+gpio_set_dir(RightDirPin,true);
+
+
+ puts("Setup pwm\n");
+     // Tell GPIO 0 it is allocated to the PWM
+    gpio_set_function(RightPwmPin, GPIO_FUNC_PWM);
+    gpio_set_function(LeftPwmPin, GPIO_FUNC_PWM);
+
+    // Find out which PWM slice is connected to pwm GPIO then configure Pwm
+    // Fpwm= Fsys/period  = 125Mhz/ 15624  = 8000.6 hz
+    // period =15624 = (Top +1) * (Phase corr+1) *( Divint + DivFrac/16)
+    //
+    uint slice_num = pwm_gpio_to_slice_num(RightPwmPin);
+    pwm_set_clkdiv_int_frac(slice_num,1,0);  // Divint, divfrac  for 8Khz PWM rate
+    slice_num = pwm_gpio_to_slice_num(LeftPwmPin);
+    pwm_set_clkdiv_int_frac(slice_num,1,0);
+    // set Top value
+        pwm_set_wrap(slice_num, 15624/2); // 
+    // Set channel A B to 50% duty cycle
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
+    pwm_set_phase_correct(slice_num,true);
+
+
+    // Set the PWM running
+    pwm_set_enabled(slice_num, true);
+    puts("pwm enabled\n");
+
+
+printf("Core 1 Started\n");
+while (1) {
+// set pwm I/O to defult
+// Pwm =0%  stopped dir =FWD
+
+// Start Encoder PIO and sampling of  position
+// set PosL and PosR to 0
+
+// wait for Motor enable 
+
+}
+}
 
 
 
@@ -129,8 +338,19 @@ if (cmdbuff[0]=='V' && cmdbuff[1]=='?' ) {
 
 //Status
 if (cmdbuff[0]=='S'  && cmdbuff[1]=='?' ) {
-  printf("Status cmd S? received: %s",cmdbuff);
+  printf("Status cmd S? received: %s\n",cmdbuff);
+  printf("Software key %H", FlashIdPtr[0]);
+printf("%H", FlashIdPtr[1]);
+printf("%H", FlashIdPtr[2]);
+printf("%H", FlashIdPtr[3]);
+printf("%H", FlashIdPtr[4]);
+printf("%H", FlashIdPtr[5]);
+printf("%H", FlashIdPtr[6]);
+printf("%H\n", FlashIdPtr[7]);
+
 }
+
+
 }
 
 
@@ -185,6 +405,9 @@ int main()
 {
     stdio_init_all();
 // create queue to hold 128 chars
+
+ multicore_launch_core1(core1_entry);
+
 
 charQueue = xQueueCreate( 128, sizeof( char ) ); //128 char buffer
 cmdQueue = xQueueCreate( 100, sizeof( char ) ); //10 cmd avalible  buffer, one CR addred to this per cmd line in input buffer, signals parser
