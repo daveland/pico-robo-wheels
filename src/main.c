@@ -71,13 +71,14 @@ uint8_t FlashIdPtr[8];  // 8 byte flash id buffer, unique per Pico Flash chip, u
 static void Left_pio_irq_handler (void) {
          // test Which IRQ was raised by state machine on PIO0 sm1
          // Left encoder is serviced by SM0 With SM flags 
-        if (pio0_hw->irq & 0)
-        {
+        //printf("leftPosition %d \n",pio0_hw->irq);
+        if (pio0_hw->irq & 1) // bit sm0
+        { //puts("leftPosition down\n");
             LeftPosition -=1;
         }
         // test if irq 1 was raised
-        if (pio0_hw->irq & 2)
-        {
+        if (pio0_hw->irq & 2) // bit sm1
+        {//puts("leftPosition up\n");
             LeftPosition +=1;
         }
         // clear both interrupts by setting to 1
@@ -86,17 +87,17 @@ static void Left_pio_irq_handler (void) {
 
 static void Right_pio_irq_handler (void) {
      // test Which IRQ was raised by state machine on PIO sm0
-        if (pio0_hw->irq & 1)
-        {
+        if (pio1_hw->irq & 1) //bit sm2
+        {//puts("RightPosition up\n");
             RightPosition -=1;
         }
         // test if irq 1 was raised
-        if (pio0_hw->irq & 3)
-        {
+        if (pio1_hw->irq & 2) //bit sm3
+        {//puts("RightPosition up\n");
             RightPosition +=1;
         }
         // clear both interrupts by setting to 1
-        pio1_hw->irq = 3;
+        pio1_hw->irq = 0x3;
 
 }
 
@@ -105,7 +106,7 @@ static void Right_pio_irq_handler (void) {
 void SetupPioLeft( )  {
     LeftPosition=0;
 
-   // pio 0 is used
+   // pio 0 SM0 is used to track A nd B left pulses
         PIO pio = pio0;
         // state machine 0
         uint8_t sm = 0;
@@ -129,7 +130,7 @@ void SetupPioLeft( )  {
         irq_set_enabled(PIO0_IRQ_0, true);
         // SM0 and SM2 are connected to up/down interrupt for Left Motor
         // on SM0 triggering Core1 IRQ0 with SMbits 0 and 2
-        pio0_hw->inte0 = PIO_IRQ0_INTE_SM0_BITS | PIO_IRQ0_INTE_SM2_BITS;
+        pio0_hw->inte0 = PIO_IRQ0_INTE_SM0_BITS | PIO_IRQ0_INTE_SM1_BITS;
         // init the sm.
         // Note: the program starts after the jump table -> initial_pc = 16
         pio_sm_init(pio, sm, 16, &c);
@@ -142,9 +143,9 @@ void SetupPioLeft( )  {
 void SetupPioRight( )  {
     RightPosition=0;
    // pio 0 is used
-        PIO pio = pio0;
+        PIO pio = pio1;
         // state machine 1
-        uint8_t sm = 1;
+        uint8_t sm = 0;
         // configure the used pins as input with pull up
        
         pio_gpio_init(pio, RightEncA);
@@ -153,10 +154,10 @@ void SetupPioRight( )  {
         gpio_set_pulls(RightEncB, true, false);
         
         // load the pio program into the pio memory
-        // uint offset = pio_add_program(pio, &pico_robo_wheels_program);
+        uint offset = pio_add_program(pio, &pico_robo_wheels_program);
         // make a sm config
         
-        pio_sm_config c = pico_robo_wheels_program_get_default_config(PIOoffset);
+        pio_sm_config c = pico_robo_wheels_program_get_default_config(offset);
         // set the 'in' pins
        
         sm_config_set_in_pins(&c, RightEncA);
@@ -165,12 +166,12 @@ void SetupPioRight( )  {
         sm_config_set_in_shift(&c, false, false, 0);
           
         // set the IRQ handler
-        irq_set_exclusive_handler(PIO0_IRQ_1, Right_pio_irq_handler);
+        irq_set_exclusive_handler(PIO1_IRQ_0, Right_pio_irq_handler);
         // enable the IRQ
-        irq_set_enabled(PIO0_IRQ_1, true);
+        irq_set_enabled(PIO1_IRQ_0, true);
         // SM1 and SM3 are connected to up/down interrupt for Right Motor
         // on SM1 triggering Core1 IRQ1 with SMbits 1 and 3
-        pio0_hw->inte0 = PIO_IRQ1_INTE_SM1_BITS | PIO_IRQ1_INTE_SM3_BITS;
+        pio1_hw->inte0 = PIO_IRQ0_INTE_SM0_BITS | PIO_IRQ0_INTE_SM1_BITS;
         // init the sm.
         // Note: the program starts after the jump table -> initial_pc = 16
         pio_sm_init(pio, sm, 16, &c);
@@ -244,7 +245,7 @@ while (1) {
 // Pwm =0%  stopped dir =FWD
 Core1counter+=1;
 sleep_ms(1000);
-printf("Core 1 Running %d\n",Core1counter);
+//printf("Core 1 Running %d\n",Core1counter);
 // Start Encoder PIO and sampling of  position
 // set PosL and PosR to 0
 

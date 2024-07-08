@@ -42,11 +42,11 @@ read:
     mov exec ISR ; do the jmp encoded in the ISR
 CW:              ; a clockwise rotation was detected
                     ; two differnt sm's are running this same code and must use different smIRQ's to tell count up and down
-    irq set 0 rel   ; signal a clockwise rotation via an IRQ, using relative sm irq #
+    irq 0 rel   ; signal a clockwise rotation via an IRQ, using relative sm irq #
                     ; so sm=0 will set SM flag=0 and sm=1 will set SM flag=1
     jmp read     ; jump to reading the current values of A and B
 CCW:             ; a counter clockwise rotation was detected
-    irq set 2 rel    ; signal a counter clockwise rotation via an IRQ ,using relative sm irq #
+    irq 1 rel    ; signal a counter clockwise rotation via an IRQ ,using relative sm irq #
                     ; so sm=0 will set SMflag=2 and sm=1 will set smflag=3
 ;    jmp read    ; jump to reading the current values of A and B.
                  ; the jmp isn't needed because of the .wrap, and the first 
