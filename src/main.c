@@ -55,6 +55,30 @@ const int RightEncB =6;
 volatile long long LeftPosition ;
 volatile long long RightPosition ; 
 volatile u_int32_t Core1counter=99;
+
+// motor velocity computed using period of interrupts on each wheel
+// meausure time from each interrupt and convert to mS. Then average this
+// over several interrupts and cacluate velocity in m/s 
+// using tire diameter and gear ratio
+//Vel (m/s) =  (1/(Tinterupt*cpr)) / gearRatio * Wheeldiam (M)*PI
+volatile int RightVelocity;
+volatile int LeftVelocity;
+int cpr=100; // encoder counts per revolution
+int GearRatio = 300;  // ratio from encoder revs to wheel revs
+int WheelDiam_m = 0.33;  // wheel diameter in meters
+
+// we measure encoder distance as a small number. Determined by encoder CPR ( counts per rev)
+// and Gear ratio from encoder to wheel , and Wheel Diameter in milimeters.
+// Keeping these in different units in integer valibles avoids slow floating point lirary 
+// calls ( no floating point unit in Pico RP2040)
+// since we have multiple 
+int DistEncoderRightuM;  // distance in uM per encoder pulse
+int DistEncoderLeftuM;
+
+// keep the last right and left encoder interrupt times for speed calulation
+uint64_t LastRightEncIntTimeuS;  
+uint64_t LastLeftEncIntTimeuS; 
+
 uint PIOoffset ;
 
 QueueHandle_t charQueue; // charachters are buffered here
@@ -63,12 +87,41 @@ QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 uint8_t FlashIdPtr[8];  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
+// Floating Point used here ONCE on bootup
+void ComputeEncoderDistances() {
+    LastRightEncIntTimeuS=0; 
+    LastLeftEncIntTimeuS=0;  
+// determine the distance in uM  that a wheel moves in one encoder count
+// we use this to keep integer math in micrometers 64bit and then multiply by number of us
+// to get how far we traveled and compute velocity..
+
+    // (one wheel rotation meters)/GearRatio) = one encoder rotation in meters
+    // = /CPR = one encoder Pulse in meters
+    // = *1e6 = one encoer pulse in u meters
+float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *1e6 ) ;  // distance in uM per encoder pulse
+DistEncoderRightuM= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
+
+ DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *1e6 ) ;  // distance in uM per encoder pulse
+DistEncoderLeftuM= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
+
+
+}
 
 
 // core1 running Bare metal
 //------------------------------------------------------------------
 
 static void Left_pio_irq_handler (void) {
+   // This distance DistEncoderRight is the  amount of motion in one encoder pulse
+    // It depends on the encoder CPR and the GearRatio From  encoder to Wheel position
+    // 
+       uint64_t currenttimeuS=time_us_64(); //read current 64 bit tic ctr
+
+       uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastLeftEncIntTimeuS); // compute delta tics since last encoder interrupr
+       LastLeftEncIntTimeuS=currenttimeuS;  //save now as new time
+       LeftVelocity = DistEncoderLeftuM/delta_ticsuS; // um/us = m/s
+
+
          // test Which IRQ was raised by state machine on PIO0 sm1
          // Left encoder is serviced by SM0 With SM flags 
         //printf("leftPosition %d \n",pio0_hw->irq);
@@ -86,7 +139,30 @@ static void Left_pio_irq_handler (void) {
 }
 
 static void Right_pio_irq_handler (void) {
-     // test Which IRQ was raised by state machine on PIO sm0
+     // to determine motor speed,  velocity = distance/Time = Meters/second
+     //we measure how many 1us tics between Encoder interrupt pulses
+     // delta_tics. This is our delta time in us 
+     // Then we figure distance traveled in one encoder pulse.
+     //  CPR = counts Per rotation.  100 counts in our case
+     //  1 count= 360deg/100 = 3.6 degs
+     //  500 motor rotations = 1 wheel rotation.
+     //  1 wheel rotation = 13 " *PI = 13*3.14159 =40.8401" =1.037 Meters
+     // 1.037/gearration=1.037/500= meters per encoder rev =.002074 Meters 
+     // meters per encoder pulse = .002074/100 = .00002074 meters
+    // each onterrupt call represents one encoder pulse that is a certain number of meters of distance 
+    // This distance DistEncoderRight is the  amount of motion in one encoder pulse
+    // It depends on the encoder CPR and the GearRatio From  encoder to Wheel position
+    // 
+       uint64_t currenttimeuS=time_us_64(); //read current 64 bit tic ctr
+
+       uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
+       LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
+       RightVelocity = DistEncoderRightuM/delta_ticsuS; // um/us = m/s
+       // 1m/s  = 1e6m/
+
+
+// test Which IRQ was raised by state machine on PIO sm1
+// this determines if we should count up or down
         if (pio1_hw->irq & 1) //bit sm2
         {//puts("RightPosition up\n");
             RightPosition -=1;
@@ -198,6 +274,7 @@ void core1_entry(void) {
 // Acceleration/decelleration control
 Core1counter =98;
 
+ComputeEncoderDistances();
 SetupPioLeft();
 SetupPioRight();
 
