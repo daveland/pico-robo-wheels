@@ -75,11 +75,12 @@ volatile u_int32_t Core1counter=99;
 // over several interrupts and cacluate velocity in m/s 
 // using tire diameter and gear ratio
 //Vel (m/s) =  (1/(Tinterupt*cpr)) / gearRatio * Wheeldiam (M)*PI
-volatile int RightVelocity;
-volatile int LeftVelocity;
-int cpr=100; // encoder counts per revolution
-int GearRatio = 300;  // ratio from encoder revs to wheel revs
-int WheelDiam_m = 0.33;  // wheel diameter in meters
+volatile int RightVelocity=0;
+volatile int LeftVelocity=0;
+int cpr=100*4; // encoder pulses per revolution * 4 counts per pulse
+int GearRatio = 20;  // ratio from encoder revs to wheel revs
+float WheelDiam_m = 0.32385;  // wheel diameter in meters
+int comp =0;
 
 //core 1
 // we measure encoder distance as a small number. Determined by encoder CPR ( counts per rev)
@@ -87,8 +88,8 @@ int WheelDiam_m = 0.33;  // wheel diameter in meters
 // Keeping these in different units in integer valibles avoids slow floating point lirary 
 // calls ( no floating point unit in Pico RP2040)
 // since we have multiple 
-int DistEncoderRightuM;  // distance in uM per encoder pulse
-int DistEncoderLeftuM;
+int DistEncoderRightuMDec;  // distance in uM per encoder pulse
+int DistEncoderLeftuMDec;
 
 // core 1 keep the last right and left encoder interrupt times for speed calulation
 uint64_t LastRightEncIntTimeuS;  
@@ -116,11 +117,29 @@ void ComputeEncoderDistances() {
     // (one wheel rotation meters)/GearRatio) = one encoder rotation in meters
     // = /CPR = one encoder Pulse in meters
     // = *1e6 = one encoer pulse in u meters
-float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *1e6 ) ;  // distance in uM per encoder pulse
-DistEncoderRightuM= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
+float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // distance in uM per encoder pulse
+DistEncoderRightuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
 
- DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *1e6 ) ;  // distance in uM per encoder pulse
-DistEncoderLeftuM= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
+ DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // distance in uM per encoder pulse
+DistEncoderLeftuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
+
+
+// figure out how long the division takes in the interrupt encoder handler
+//  we need it to be pretty fast .. It should be since there is a 64 Bit 
+// Hardware Divider in each core..  
+uint64_t BegintimeuS=time_us_64(); //read current 64 bit tic ctr
+ uint32_t delta_ticsuS;
+for (int i=0;i<1000000;i++) {
+
+    // this takes 1.26us From, here ...
+    uint64_t currenttimeuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
+       LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // um/us = m/s
+    ///   to hear ...
+}
+uint64_t donetimeus=time_us_64();
+
+comp=donetimeus-BegintimeuS;
 
 
 }
@@ -137,7 +156,7 @@ static void Left_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastLeftEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastLeftEncIntTimeuS=currenttimeuS;  //save now as new time
-       LeftVelocity = DistEncoderLeftuM/delta_ticsuS; // um/us = m/s
+       LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/100; // um/us = m/s
 
 
          // test Which IRQ was raised by state machine on PIO0 sm1
@@ -175,7 +194,7 @@ static void Right_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
-       RightVelocity = DistEncoderRightuM/delta_ticsuS; // um/us = m/s
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // um/us = m/s
        // 1m/s  = 1e6m/
 
 
@@ -199,7 +218,9 @@ static void Right_pio_irq_handler (void) {
 // setup pio0  to do the left motor encoder
 void SetupPioLeft( )  {
     LeftPosition=0;
-
+    LeftVelocity=0;
+    LastLeftEncIntTimeuS=time_us_64();
+    
    // pio 0 SM0 is used to track A nd B left pulses
         PIO pio = pio0;
         // state machine 0
@@ -236,6 +257,9 @@ void SetupPioLeft( )  {
 // setup pio0  to do the Right motor encoder
 void SetupPioRight( )  {
     RightPosition=0;
+    RightVelocity=0;
+    LastRightEncIntTimeuS=time_us_64();
+
    // pio 0 is used
         PIO pio = pio1;
         // state machine 1
@@ -466,7 +490,12 @@ printf("%H", FlashIdPtr[4]);
 printf("%H", FlashIdPtr[5]);
 printf("%H", FlashIdPtr[6]);
 printf("%H\n", FlashIdPtr[7]);
-printf("core1count=%d",Core1counter);
+printf("core1count=%d\n",Core1counter);
+printf("left velocity %d\n",LeftVelocity);
+printf("right velocity %d\n",RightVelocity);
+printf("DistEnccountRightuM%d\n",DistEncoderRightuMDec);
+printf("DistEnccountLeftuM%d\n",DistEncoderLeftuMDec);
+printf("comp=%d\n",comp);
 }
 
 
