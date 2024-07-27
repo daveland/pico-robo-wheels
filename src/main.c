@@ -53,17 +53,25 @@
 #include "pico-robo-wheels.pio.h"
 // Core 0 PWM 
 // define Motor pwm pins to output pwm and direction for each motor
-const uint LeftPwmPin =1;  // dio pin 1 
-const uint LeftDirPin =2;
-const uint RightPwmPin =8;  // dio pin 2
-const uint RightDirPin =9;
+const uint LeftPwmPin =1;  // PWM block
+const uint LeftMtrPinA =2;  // GPIO control of Motor driver Hbridge
+const uint LeftMtrPinB =3;
+
+const uint RightPwmPin =8;  //PWM Block
+const uint RightMtrPinA =9; // GPIO control of Motor driver Hbridge
+const uint RightMtrPinB =10;
 
 //Core 1
 // define Encoder AB input pins
-const int LeftEncA =3; //Pio0
-const int LeftEncB =4;
-const int RightEncA =5; //Pio1
-const int RightEncB =6;
+// Each pair must be adjacent  A+1=B
+//Left encoder PIO0 block SM0  and Right encoder PIO1 block SM0
+// We load same PIO code into both PIO blocks memory
+const int LeftEncA =4; // use 2 pio blocks for now... Should be able to move to one PIO Block
+const int LeftEncB =5;  // interrupts are not working like I expect to have 2 "copies" of the same 
+const int RightEncA =6; // PIO Program Running on two SM's in the same PIO block and having unique 
+const int RightEncB =7; // interrupts to call the count up/down IRQ's 
+// seperatly Running on 2 pio blocks solves this for now
+
 
 //core 1
 // Position is 64 bits Signed !!
@@ -81,7 +89,8 @@ volatile int RightVelocity=0;
 volatile int LeftVelocity=0;
 int cpr=100*4; // encoder pulses per revolution * 4 counts per pulse
 int GearRatio = 20;  // ratio from encoder revs to wheel revs
-float WheelDiam_m = 0.32385;  // wheel diameter in meters
+float LeftWheelDiam_m = 0.32385;  // wheel diameter in meters
+float RightWheelDiam_m = 0.33385;  // wheel diameter in meters
 int comp =0;
 
 //core 1
@@ -106,7 +115,7 @@ QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 pico_unique_board_id_t * FlashIdPtr;  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
-char * PGMVersion = "0.2.0";
+char * PGMVersion = "0.2.2";
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
@@ -119,10 +128,10 @@ void ComputeEncoderDistances() {
     // (one wheel rotation meters)/GearRatio) = one encoder rotation in meters
     // = /CPR = one encoder Pulse in meters
     // = *1e6 = one encoder pulse in u meters
-float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // 100 * the distance in uM per encoder pulse
+float DistuMPerCountfloat= ((((RightWheelDiam_m*3.14159)/GearRatio)/cpr) *1000e6 ) ;  // 100 * the distance in uM per encoder pulse
 DistEncoderRightuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
 
- DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // 100 * the distance in uM per encoder pulse
+ DistuMPerCountfloat= ((((LeftWheelDiam_m*3.14159)/GearRatio)/cpr) *1000e6 ) ;  // 100 * the distance in uM per encoder pulse
 DistEncoderLeftuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
 
 
@@ -136,7 +145,7 @@ for (int i=0;i<1000000;i++) {
     // this takes 1.26us From, here ...
     uint64_t currenttimeuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
-       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/1000; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
     ///   to here ...
 }
 uint64_t donetimeus=time_us_64();
@@ -158,7 +167,7 @@ static void Left_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastLeftEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastLeftEncIntTimeuS=currenttimeuS;  //save now as new time
-       LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
+       LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/1000; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
 
 
          // test Which IRQ was raised by state machine on PIO0 sm1
@@ -196,7 +205,7 @@ static void Right_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
-       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/1000; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
        // 1m/s  = 1e6m/
 
 
@@ -218,7 +227,7 @@ static void Right_pio_irq_handler (void) {
 
 
 // setup pio0  to do the left motor encoder
-void SetupPioLeft( )  {
+void SetupPioEncoderLeft( )  {
     LeftPosition=0;
     LeftVelocity=0;
     LastLeftEncIntTimeuS=time_us_64();
@@ -257,7 +266,7 @@ void SetupPioLeft( )  {
 
 
 // setup pio0  to do the Right motor encoder
-void SetupPioRight( )  {
+void SetupPioEncoderRight( )  {
     RightPosition=0;
     RightVelocity=0;
     LastRightEncIntTimeuS=time_us_64();
@@ -319,8 +328,8 @@ void core1_entry(void) {
 Core1counter =98;
 
 ComputeEncoderDistances();
-SetupPioLeft();
-SetupPioRight();
+SetupPioEncoderLeft();
+SetupPioEncoderRight();
 
 Core1counter =1;
 
@@ -328,14 +337,15 @@ pico_get_unique_board_id(FlashIdPtr); // used as sofware key
 
 // setup PWM Pin I/O
 gpio_set_dir(LeftPwmPin,true);
-gpio_set_dir(LeftDirPin,true);
+gpio_set_dir(LeftMtrPinA,true);
+gpio_set_dir(LeftMtrPinB,true);
 gpio_set_dir(RightPwmPin,true);
-gpio_set_dir(RightDirPin,true);
-
+gpio_set_dir(RightMtrPinA,true);
+gpio_set_dir(RightMtrPinB,true);
 Core1counter =2;
 
  puts("Setup pwm\n");
-     // Tell GPIO 0 it is allocated to the PWM
+     // Tell GPIO s it is allocated to the PWM
     gpio_set_function(RightPwmPin, GPIO_FUNC_PWM);
     gpio_set_function(LeftPwmPin, GPIO_FUNC_PWM);
 
@@ -343,21 +353,25 @@ Core1counter =2;
     // Fpwm= Fsys/period  = 125Mhz/ 15624  = 8000.6 hz
     // period =15624 = (Top +1) * (Phase corr+1) *( Divint + DivFrac/16)
     //
-    uint slice_num = pwm_gpio_to_slice_num(RightPwmPin);
-    pwm_set_clkdiv_int_frac(slice_num,1,0);  // Divint, divfrac  for 8Khz PWM rate
-    slice_num = pwm_gpio_to_slice_num(LeftPwmPin);
-    pwm_set_clkdiv_int_frac(slice_num,1,0);
+    uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
+    pwm_set_clkdiv_int_frac(Rightslice_num,1,0);  // Divint, divfrac  for 8Khz PWM rate
+    uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
+    pwm_set_clkdiv_int_frac(Leftslice_num,1,0);
     // set Top value
-        pwm_set_wrap(slice_num, 15624/2); // 
+        pwm_set_wrap(Rightslice_num, 15624/2); // 
+          pwm_set_wrap(Leftslice_num, 15624/2); // 
     // Set channel A B to 50% duty cycle
-    pwm_set_chan_level(slice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
-    pwm_set_chan_level(slice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
-    pwm_set_phase_correct(slice_num,true);
-
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
+    pwm_set_phase_correct(Rightslice_num,true);
+    pwm_set_phase_correct(Leftslice_num,true);
 
     // Set the PWM running
-    pwm_set_enabled(slice_num, true);
-    puts("pwm enabled\n");
+    pwm_set_enabled(Rightslice_num, true);
+    puts("pwm Right enabled\n");
+
+    pwm_set_enabled(Leftslice_num, true);
+    puts("pwm Left enabled\n");
 
 Core1counter =3;
 printf("Core 1 Started\n");
@@ -485,19 +499,19 @@ if (cmdbuff[0]=='V' && cmdbuff[1]=='?' ) {
 if (cmdbuff[0]=='S'  && cmdbuff[1]=='?' ) {
   printf("Status cmd S? received: %s\n",cmdbuff);
   printf("version= %s\n",PGMVersion);
-  printf("Software key %H", FlashIdPtr[0]);
-printf("%H", FlashIdPtr[1]);
-printf("%H", FlashIdPtr[2]);
-printf("%H", FlashIdPtr[3]);
-printf("%H", FlashIdPtr[4]);
-printf("%H", FlashIdPtr[5]);
-printf("%H", FlashIdPtr[6]);
-printf("%H\n", FlashIdPtr[7]);
+  printf("Software key= %02X", FlashIdPtr->id[0]);
+printf("%02X", FlashIdPtr->id[1]);
+printf("%02X", FlashIdPtr->id[2]);
+printf("%02X", FlashIdPtr->id[3]);
+printf("%02X", FlashIdPtr->id[4]);
+printf("%02X", FlashIdPtr->id[5]);
+printf("%02X", FlashIdPtr->id[6]);
+printf("%02X\n", FlashIdPtr->id[7]);
 printf("core1count=%d\n",Core1counter);
 printf("left velocity %d\n",LeftVelocity);
 printf("right velocity %d\n",RightVelocity);
-printf("DistEnccountRightuM%f um/enc cnt\n",(float) (DistEncoderRightuMDec)/100.0);
-printf("DistEnccountLeftuM%d\n",DistEncoderLeftuMDec);
+printf("DistEnccountRightuM= %f um/enc_cnt\n",(float) (DistEncoderRightuMDec)/1000.0);
+printf("DistEnccountLeftuM= %f um/enc_cnt\n",(float) (DistEncoderLeftuMDec)/1000.0);
 printf("comp=%d\n",comp);
 }
 
