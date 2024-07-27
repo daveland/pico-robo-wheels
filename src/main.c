@@ -1,5 +1,5 @@
-/** pico-robo-wheels
- * Copyright (C) {David L. Anderson} - All Rights Reserved
+/** pico-robo-wheels july 2024 -- "The beginning of Davenet" and the robot appocolypse
+ * Copyright (C) 2024 {David L. Anderson} - All Rights Reserved
  * 
  * This source code is protected under international copyright law.  All rights
  * reserved and protected by the copyright holders.
@@ -25,9 +25,20 @@
 
 // core 0 starts Core 1 slave running before starting  RTOS Kernel.
 
-// Core 1 is used as a slave and I NOT managed by FreeRTOS
+// Core 1 is used as a slave and IS NOT managed by FreeRTOS
 // Core 1 runs the Quadrature encoders and manages position
 // Core 1 runs the PWM for the 2 motors L+R
+// Data space is shared by Global Variables ( a bad way i know)
+// At this point I don't yet understand how 2 cores Share data without corruption
+// due to simultainious access
+// do for now Core 1 ( non RT slave)  writes to the Variable space and core 0
+// Only reads them..  This works as long as all cor1 handles are inputs
+
+// core 1 handles PIO position interrupts from 2 encoders
+// Core 1 handles Velocity calcs from encoders
+// core 1 incriments core1 counter every 1 sec 
+
+
 #include "pico/multicore.h"
 
 #include "hardware/pwm.h" // Hardware PWM
@@ -38,24 +49,27 @@
 
 
 #include "pico-robo-wheels.pio.h"
-
+// Core 0 PWM 
 // define Motor pwm pins to output pwm and direction for each motor
 const uint LeftPwmPin =1;  // dio pin 1 
 const uint LeftDirPin =2;
 const uint RightPwmPin =8;  // dio pin 2
 const uint RightDirPin =9;
 
+//Core 1
 // define Encoder AB input pins
 const int LeftEncA =3; //Pio0
 const int LeftEncB =4;
 const int RightEncA =5; //Pio1
 const int RightEncB =6;
 
+//core 1
 // Position is 64 bits Signed !!
 volatile long long LeftPosition ;
 volatile long long RightPosition ; 
 volatile u_int32_t Core1counter=99;
 
+ //core 1
 // motor velocity computed using period of interrupts on each wheel
 // meausure time from each interrupt and convert to mS. Then average this
 // over several interrupts and cacluate velocity in m/s 
@@ -67,6 +81,7 @@ int cpr=100; // encoder counts per revolution
 int GearRatio = 300;  // ratio from encoder revs to wheel revs
 int WheelDiam_m = 0.33;  // wheel diameter in meters
 
+//core 1
 // we measure encoder distance as a small number. Determined by encoder CPR ( counts per rev)
 // and Gear ratio from encoder to wheel , and Wheel Diameter in milimeters.
 // Keeping these in different units in integer valibles avoids slow floating point lirary 
@@ -75,10 +90,11 @@ int WheelDiam_m = 0.33;  // wheel diameter in meters
 int DistEncoderRightuM;  // distance in uM per encoder pulse
 int DistEncoderLeftuM;
 
-// keep the last right and left encoder interrupt times for speed calulation
+// core 1 keep the last right and left encoder interrupt times for speed calulation
 uint64_t LastRightEncIntTimeuS;  
 uint64_t LastLeftEncIntTimeuS; 
 
+//Core 0
 uint PIOoffset ;
 
 QueueHandle_t charQueue; // charachters are buffered here
@@ -86,6 +102,8 @@ QueueHandle_t charQueue; // charachters are buffered here
 QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 uint8_t FlashIdPtr[8];  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
+
+
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
