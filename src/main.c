@@ -15,7 +15,7 @@
 #include "queue.h"
 #include <stdio.h>
 #include "pico/stdlib.h"
-
+#include "pico/unique_id.h"  //eeprom unique_id
 
 #include "pico-robo-wheels.pio.h"
 
@@ -46,6 +46,8 @@
 #include "hardware/flash.h"
 #include "hardware/irq.h"
 #include "hardware/pio.h"
+
+
 
 
 #include "pico-robo-wheels.pio.h"
@@ -88,8 +90,8 @@ int comp =0;
 // Keeping these in different units in integer valibles avoids slow floating point lirary 
 // calls ( no floating point unit in Pico RP2040)
 // since we have multiple 
-int DistEncoderRightuMDec;  // distance in uM per encoder pulse
-int DistEncoderLeftuMDec;
+int DistEncoderRightuMDec;  // distance in uM per encoder pulse *100 
+int DistEncoderLeftuMDec;   // distance in uM per encoder pulse *100 
 
 // core 1 keep the last right and left encoder interrupt times for speed calulation
 uint64_t LastRightEncIntTimeuS;  
@@ -102,9 +104,9 @@ QueueHandle_t charQueue; // charachters are buffered here
 
 QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
-uint8_t FlashIdPtr[8];  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
+pico_unique_board_id_t * FlashIdPtr;  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
-
+char * PGMVersion = "0.2.0";
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
@@ -116,11 +118,11 @@ void ComputeEncoderDistances() {
 
     // (one wheel rotation meters)/GearRatio) = one encoder rotation in meters
     // = /CPR = one encoder Pulse in meters
-    // = *1e6 = one encoer pulse in u meters
-float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // distance in uM per encoder pulse
+    // = *1e6 = one encoder pulse in u meters
+float DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // 100 * the distance in uM per encoder pulse
 DistEncoderRightuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
 
- DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // distance in uM per encoder pulse
+ DistuMPerCountfloat= ((((WheelDiam_m*3.14159)/GearRatio)/cpr) *100e6 ) ;  // 100 * the distance in uM per encoder pulse
 DistEncoderLeftuMDec= (int) DistuMPerCountfloat ; //Truncate ?? or round ??
 
 
@@ -134,8 +136,8 @@ for (int i=0;i<1000000;i++) {
     // this takes 1.26us From, here ...
     uint64_t currenttimeuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
-       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // um/us = m/s
-    ///   to hear ...
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
+    ///   to here ...
 }
 uint64_t donetimeus=time_us_64();
 
@@ -156,7 +158,7 @@ static void Left_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastLeftEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastLeftEncIntTimeuS=currenttimeuS;  //save now as new time
-       LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/100; // um/us = m/s
+       LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
 
 
          // test Which IRQ was raised by state machine on PIO0 sm1
@@ -194,7 +196,7 @@ static void Right_pio_irq_handler (void) {
 
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastRightEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastRightEncIntTimeuS=currenttimeuS;  //save now as new time
-       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // um/us = m/s
+       RightVelocity = DistEncoderRightuMDec/delta_ticsuS/100; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
        // 1m/s  = 1e6m/
 
 
@@ -322,7 +324,7 @@ SetupPioRight();
 
 Core1counter =1;
 
-//flash_get_unique_id(FlashIdPtr); // used as sofware key
+pico_get_unique_board_id(FlashIdPtr); // used as sofware key
 
 // setup PWM Pin I/O
 gpio_set_dir(LeftPwmPin,true);
@@ -482,6 +484,7 @@ if (cmdbuff[0]=='V' && cmdbuff[1]=='?' ) {
 //Status
 if (cmdbuff[0]=='S'  && cmdbuff[1]=='?' ) {
   printf("Status cmd S? received: %s\n",cmdbuff);
+  printf("version= %s\n",PGMVersion);
   printf("Software key %H", FlashIdPtr[0]);
 printf("%H", FlashIdPtr[1]);
 printf("%H", FlashIdPtr[2]);
@@ -493,7 +496,7 @@ printf("%H\n", FlashIdPtr[7]);
 printf("core1count=%d\n",Core1counter);
 printf("left velocity %d\n",LeftVelocity);
 printf("right velocity %d\n",RightVelocity);
-printf("DistEnccountRightuM%d\n",DistEncoderRightuMDec);
+printf("DistEnccountRightuM%f um/enc cnt\n",(float) (DistEncoderRightuMDec)/100.0);
 printf("DistEnccountLeftuM%d\n",DistEncoderLeftuMDec);
 printf("comp=%d\n",comp);
 }
