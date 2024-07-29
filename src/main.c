@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"  //eeprom unique_id
-
+#include "string.h"
 #include "pico-robo-wheels.pio.h"
 
 
@@ -47,7 +47,23 @@
 #include "hardware/irq.h"
 #include "hardware/pio.h"
 
+// Motor controller info
+//
 
+enum D100AMtrDir {
+    FWD = 1,
+    REV = 2,
+    BRAKE = 0,
+    COAST = 3,
+};
+
+//typedef MtrDrverinfo {
+  //  uint8_t ctrltype;
+  //  uint8_t mtrfwd;
+  //  uint8_t mtrrev;
+//} Mtr;
+
+//MtrDrverinfo D100A = {.ctrltype=0,.mtrfwd=FWD,.mtrrev=2} ;
 
 
 #include "pico-robo-wheels.pio.h"
@@ -75,9 +91,11 @@ const int RightEncB =7; // interrupts to call the count up/down IRQ's
 
 //core 1
 // Position is 64 bits Signed !!
-volatile long long LeftPosition ;
-volatile long long RightPosition ; 
-volatile u_int32_t Core1counter=99;
+volatile long long LeftPosition ;  // 64 bits
+volatile long long RightPosition ; //64 bits
+volatile u_int32_t Core1counter=0; 
+volatile uint32_t Core1State;  // state of core1
+
 
  //core 1
 // motor velocity computed using period of interrupts on each wheel
@@ -310,6 +328,47 @@ void SetupPioEncoderRight( )  {
     }
 
 
+void InitMotorABPins() {
+gpio_set_dir(LeftPwmPin,true);
+gpio_set_dir(LeftMtrPinA,true);
+gpio_set_dir(LeftMtrPinB,true);
+gpio_set_dir(RightPwmPin,true);
+gpio_set_dir(RightMtrPinA,true);
+gpio_set_dir(RightMtrPinB,true);
+    
+}
+
+void InitMotorPWMPins () {
+
+ puts("Setup pwm\n");
+     // Tell GPIO s it is allocated to the PWM
+    gpio_set_function(RightPwmPin, GPIO_FUNC_PWM);
+    gpio_set_function(LeftPwmPin, GPIO_FUNC_PWM);
+
+    // Find out which PWM slice is connected to pwm GPIO then configure Pwm
+    // Fpwm= Fsys/period  = 125Mhz/ 15624  = 8000.6 hz
+    // period =15624 = (Top +1) * (Phase corr+1) *( Divint + DivFrac/16)
+    //
+    uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
+    pwm_set_clkdiv_int_frac(Rightslice_num,1,0);  // Divint, divfrac  for 8Khz PWM rate
+    uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
+    pwm_set_clkdiv_int_frac(Leftslice_num,1,0);
+    // set Top value 8Khz ???
+        pwm_set_wrap(Rightslice_num, 15624/2); // 
+          pwm_set_wrap(Leftslice_num, 15624/2); // 
+    // Set channel A B to 50% duty cycle
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/4); //50% duty cycle
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_A, 15624/4); //50% duty cycle
+    pwm_set_phase_correct(Rightslice_num,true);
+    pwm_set_phase_correct(Leftslice_num,true);
+
+    // Set the PWM running
+    pwm_set_enabled(Rightslice_num, true);
+    puts("pwm Right enabled\n");
+
+    pwm_set_enabled(Leftslice_num, true);
+    puts("pwm Left enabled\n");
+}
 
 
 
@@ -325,55 +384,22 @@ void core1_entry(void) {
 // Velocty calulation for each motor
 // virtual transmission locking Left and right speeds together
 // Acceleration/decelleration control
-Core1counter =98;
+Core1State =98;
 
 ComputeEncoderDistances();
 SetupPioEncoderLeft();
 SetupPioEncoderRight();
 
-Core1counter =1;
+Core1State =1;
 
 pico_get_unique_board_id(FlashIdPtr); // used as sofware key
 
 // setup PWM Pin I/O
-gpio_set_dir(LeftPwmPin,true);
-gpio_set_dir(LeftMtrPinA,true);
-gpio_set_dir(LeftMtrPinB,true);
-gpio_set_dir(RightPwmPin,true);
-gpio_set_dir(RightMtrPinA,true);
-gpio_set_dir(RightMtrPinB,true);
-Core1counter =2;
+InitMotorABPins();
+InitMotorPWMPins();
 
- puts("Setup pwm\n");
-     // Tell GPIO s it is allocated to the PWM
-    gpio_set_function(RightPwmPin, GPIO_FUNC_PWM);
-    gpio_set_function(LeftPwmPin, GPIO_FUNC_PWM);
 
-    // Find out which PWM slice is connected to pwm GPIO then configure Pwm
-    // Fpwm= Fsys/period  = 125Mhz/ 15624  = 8000.6 hz
-    // period =15624 = (Top +1) * (Phase corr+1) *( Divint + DivFrac/16)
-    //
-    uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
-    pwm_set_clkdiv_int_frac(Rightslice_num,1,0);  // Divint, divfrac  for 8Khz PWM rate
-    uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
-    pwm_set_clkdiv_int_frac(Leftslice_num,1,0);
-    // set Top value
-        pwm_set_wrap(Rightslice_num, 15624/2); // 
-          pwm_set_wrap(Leftslice_num, 15624/2); // 
-    // Set channel A B to 50% duty cycle
-    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
-    pwm_set_chan_level(Leftslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
-    pwm_set_phase_correct(Rightslice_num,true);
-    pwm_set_phase_correct(Leftslice_num,true);
-
-    // Set the PWM running
-    pwm_set_enabled(Rightslice_num, true);
-    puts("pwm Right enabled\n");
-
-    pwm_set_enabled(Leftslice_num, true);
-    puts("pwm Left enabled\n");
-
-Core1counter =3;
+Core1State =3;
 printf("Core 1 Started\n");
 while (1) {
 // set pwm I/O to defult
@@ -485,15 +511,107 @@ cmdbuff[i]=0; //add temintating null
 //printf("Length %d chars",i);
 //printf("cmdbuff=%s\n",cmdbuff);
 //printf("CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
-// POS
+
+// Show POSition command
 if (cmdbuff[0]=='P' && cmdbuff[1]=='?' ) {
   printf("Position cmd P? received",cmdbuff);
   printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
 }
-//VELocity
+//show VELocity
 if (cmdbuff[0]=='V' && cmdbuff[1]=='?' ) {
-  printf("Velocity cmd V? received %s",cmdbuff);
+  printf("Show Velocity cmd V? received %s",cmdbuff);
+  printf("left velocity %f m/s\n ",(float)(LeftVelocity)/1000E6);
+printf("right velocity %F m/s \n",RightVelocity);
 }
+//Position Reset command  set position to 0
+if (cmdbuff[0]=='R' && cmdbuff[1]=='S' ) {
+  printf("Position reset RS received",cmdbuff);
+  LeftPosition=0;
+  RightPosition=0;
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+
+//Forward Motors
+if (cmdbuff[0]=='F' && cmdbuff[1]=='W' ) {
+  printf("Command FW received",cmdbuff);
+  gpio_put(LeftMtrPinA,1);
+  gpio_put(LeftMtrPinB,0);
+
+  gpio_put(RightMtrPinA,1);
+  gpio_put(RightMtrPinB,0);
+ 
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+// Right turn motors
+if (cmdbuff[0]=='R' && cmdbuff[1]=='T' ) {
+  printf("Command FW received",cmdbuff);
+  gpio_put(LeftMtrPinA,1);
+  gpio_put(LeftMtrPinB,0);
+
+  gpio_put(RightMtrPinA,0);
+  gpio_put(RightMtrPinB,1);
+ 
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+// Left turn motors
+if (cmdbuff[0]=='L' && cmdbuff[1]=='T' ) {
+  printf("Command FW received",cmdbuff);
+  gpio_put(LeftMtrPinA,0);
+  gpio_put(LeftMtrPinB,1);
+
+  gpio_put(RightMtrPinA,1);
+  gpio_put(RightMtrPinB,0);
+ 
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+// reverse motors
+if (cmdbuff[0]=='R' && cmdbuff[1]=='V' ) {
+  printf("Command FW received",cmdbuff);
+  gpio_put(LeftMtrPinA,0);
+  gpio_put(LeftMtrPinB,1);
+
+  gpio_put(RightMtrPinA,0);
+  gpio_put(RightMtrPinB,1);
+ 
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+// 100A driver .. Green heatsink
+//A1,A2=0,0 is the brake;
+//A1,A2=1,0 is FWD rotation;
+//A1,A2=0,1 is Rev Direction;
+//A1,A2=1,1 is not allowed ?? perhaps coast?
+//PA is PWM wave input (motor speed regulation);
+//G is the common pin with the control board (route B is the same control);
+
+// 12A driver Orange heatsink
+//A1,B1 =0,0
+//A1,B1 =1,0
+//A1,B1 =0,1
+//A1,B1 =1,1
+
+
+// Stop motor using Brake SB
+if (cmdbuff[0]=='S' && cmdbuff[1]=='B' ) {
+  printf("Command SB received",cmdbuff);
+  gpio_put(LeftMtrPinA,0);
+  gpio_put(LeftMtrPinB,0);
+
+  gpio_put(RightMtrPinA,0);
+  gpio_put(RightMtrPinB,0);
+ 
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+
+// Set Both motors PWM ( NOT Velocity controlled)
+// only use when VC=0 (velocity control =0 means off)
+// PW,Value
+if (cmdbuff[0]=='P' && cmdbuff[1]=='W' && cmdbuff[2]==',' ) {
+  printf("PWmset command received PW,hex value received",cmdbuff);
+printf("Cmd buff length=%d",strlen(cmdbuff));
+
+  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+}
+
 
 //Status
 if (cmdbuff[0]=='S'  && cmdbuff[1]=='?' ) {
