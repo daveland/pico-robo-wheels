@@ -14,6 +14,7 @@
 #include "task.h"
 #include "queue.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"  //eeprom unique_id
 #include "string.h"
@@ -69,11 +70,11 @@ enum D100AMtrDir {
 #include "pico-robo-wheels.pio.h"
 // Core 0 PWM 
 // define Motor pwm pins to output pwm and direction for each motor
-const uint LeftPwmPin =1;  // PWM block
+const uint LeftPwmPin =1;  // GPIO #1
 const uint LeftMtrPinA =2;  // GPIO control of Motor driver Hbridge
 const uint LeftMtrPinB =3;
 
-const uint RightPwmPin =8;  //PWM Block
+const uint RightPwmPin =8;  //GPIO #8
 const uint RightMtrPinA =9; // GPIO control of Motor driver Hbridge
 const uint RightMtrPinB =10;
 
@@ -329,10 +330,13 @@ void SetupPioEncoderRight( )  {
 
 
 void InitMotorABPins() {
-gpio_set_dir(LeftPwmPin,true);
+//gpio_set_dir(LeftPwmPin,true);
+gpio_set_drive_strength(LeftPwmPin,GPIO_DRIVE_STRENGTH_12MA);
+gpio_set_drive_strength(LeftMtrPinA,GPIO_DRIVE_STRENGTH_12MA);
+gpio_set_drive_strength(LeftMtrPinB,GPIO_DRIVE_STRENGTH_12MA);
 gpio_set_dir(LeftMtrPinA,true);
 gpio_set_dir(LeftMtrPinB,true);
-gpio_set_dir(RightPwmPin,true);
+//gpio_set_dir(RightPwmPin,true);
 gpio_set_dir(RightMtrPinA,true);
 gpio_set_dir(RightMtrPinB,true);
     
@@ -354,13 +358,13 @@ void InitMotorPWMPins () {
     uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
     pwm_set_clkdiv_int_frac(Leftslice_num,1,0);
     // set Top value 8Khz ???
-        pwm_set_wrap(Rightslice_num, 15624/2); // 
-          pwm_set_wrap(Leftslice_num, 15624/2); // 
+        pwm_set_wrap(Rightslice_num, 15624); // 
+          pwm_set_wrap(Leftslice_num, 15624); // 
     // Set channel A B to 50% duty cycle
-    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/4); //50% duty cycle
-    pwm_set_chan_level(Leftslice_num, PWM_CHAN_A, 15624/4); //50% duty cycle
-    pwm_set_phase_correct(Rightslice_num,true);
-    pwm_set_phase_correct(Leftslice_num,true);
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, 15624/2); //50% duty cycle
+    //pwm_set_phase_correct(Rightslice_num,true);
+    //pwm_set_phase_correct(Leftslice_num,true);
 
     // Set the PWM running
     pwm_set_enabled(Rightslice_num, true);
@@ -397,7 +401,7 @@ pico_get_unique_board_id(FlashIdPtr); // used as sofware key
 // setup PWM Pin I/O
 InitMotorABPins();
 InitMotorPWMPins();
-
+gpio_set_dir(LeftPwmPin,true);
 
 Core1State =3;
 printf("Core 1 Started\n");
@@ -607,9 +611,20 @@ if (cmdbuff[0]=='S' && cmdbuff[1]=='B' ) {
 // PW,Value
 if (cmdbuff[0]=='P' && cmdbuff[1]=='W' && cmdbuff[2]==',' ) {
   printf("PWmset command received PW,hex value received",cmdbuff);
-printf("Cmd buff length=%d",strlen(cmdbuff));
+  long sval;
+  char *end;
+  sval=strtol(cmdbuff+3,&end,16);
+  printf("val=%lx\n",sval);
 
-  printf("L=%lld,R=%lld\n",LeftPosition,RightPosition);
+printf("Cmd buff length=%d",strlen(cmdbuff));
+  LeftVelocity=(int)sval;
+RightVelocity=(int)sval;
+// set pwm block to velocity value
+    uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
+    uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, (int) sval); //50% duty cycle
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, (int) sval); //50% duty cycle
+  printf("L=%d,R=%d\n",LeftVelocity,RightVelocity);
 }
 
 
