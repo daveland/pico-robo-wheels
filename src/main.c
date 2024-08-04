@@ -78,6 +78,7 @@ const uint RightPwmPin =8;  //GPIO #8
 const uint RightMtrPinA =9; // GPIO control of Motor driver Hbridge
 const uint RightMtrPinB =10;
 
+const uint PWMTOP = 15624 ;  //top value for PWM counters 
 //Core 1
 // define Encoder AB input pins
 // Each pair must be adjacent  A+1=B
@@ -358,11 +359,11 @@ void InitMotorPWMPins () {
     uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
     pwm_set_clkdiv_int_frac(Leftslice_num,1,0);
     // set Top value 8Khz ???
-        pwm_set_wrap(Rightslice_num, 15624); // 
-          pwm_set_wrap(Leftslice_num, 15624); // 
+        pwm_set_wrap(Rightslice_num, PWMTOP); // 
+          pwm_set_wrap(Leftslice_num, PWMTOP); // 
     // Set channel A B to 50% duty cycle
-    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, 15624/2); //50% duty cycle
-    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, 15624/2); //50% duty cycle
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, PWMTOP/2 ); //50% duty cycle
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, PWMTOP/2); //50% duty cycle
     //pwm_set_phase_correct(Rightslice_num,true);
     //pwm_set_phase_correct(Leftslice_num,true);
 
@@ -610,21 +611,22 @@ if (cmdbuff[0]=='S' && cmdbuff[1]=='B' ) {
 // only use when VC=0 (velocity control =0 means off)
 // PW,Value
 if (cmdbuff[0]=='P' && cmdbuff[1]=='W' && cmdbuff[2]==',' ) {
-  printf("PWmset command received PW,hex value received",cmdbuff);
+  printf("PWmset command received PW,decimal value received=%d\n",cmdbuff);
   long sval;
   char *end;
-  sval=strtol(cmdbuff+3,&end,16);
-  printf("val=%lx\n",sval);
+  sval=strtol(cmdbuff+3,&end,10);
+  printf("val=%ld\n",sval);
 
 printf("Cmd buff length=%d",strlen(cmdbuff));
-  LeftVelocity=(int)sval;
-RightVelocity=(int)sval;
 // set pwm block to velocity value
     uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
     uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
-    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, (int) sval); //50% duty cycle
-    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, (int) sval); //50% duty cycle
-  printf("L=%d,R=%d\n",LeftVelocity,RightVelocity);
+    uint PWMchanval=(float) sval*0.01  * PWMTOP;
+    printf("PWMChanVal=%d\n",PWMchanval); 
+    pwm_set_chan_level(Rightslice_num, PWM_CHAN_A, PWMchanval ); //% duty cycle to chan level
+    pwm_set_chan_level(Leftslice_num, PWM_CHAN_B, PWMchanval); //% duty cycle to chan level
+  
+  //printf("L=%d,R=%d\n",LeftPWMVal,RightPWMVal); // measured velocity
 }
 
 
