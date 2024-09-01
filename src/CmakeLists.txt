@@ -10,11 +10,16 @@ target_include_directories(${ProjectName} PRIVATE
 
 target_link_libraries(${ProjectName} 
     pico_stdlib 
+    pico_stdio
     FreeRTOS-Kernel-Heap4 
     hardware_pwm
     hardware_timer
     hardware_flash
     hardware_pio
+    hardware_sync
+    hardware_irq
+    pico_multicore
+
     )
 
 

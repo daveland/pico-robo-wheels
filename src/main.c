@@ -48,6 +48,32 @@
 #include "hardware/irq.h"
 #include "hardware/pio.h"
 
+
+//Spinlocks
+// Core1 is running data collection routines and modifying shared global varibles
+// A single spinlock is used for access to all
+// core1 -> Core0 direction data  
+// Core1 position L/R updates (encoder interupt based)
+// Core1 Velocity L/R updates ( encoder interrupt based)
+
+//core0 -> core1 direction data
+// Motor PWM ??  assume motor pwm is defined in Rtos core 0 path planner ??
+
+
+
+// Two variables to store core number
+volatile int corenum_0  ;
+volatile int corenum_1  ;
+
+// Global counter for spinlock experimenting
+volatile int global_counter = 0 ;
+
+// Core0-Core1 data spinlock number, initiakized by core0 before core1 startup
+int spinlock_num_count ;
+spin_lock_t *spinlock_count ;
+
+
+
 // Motor controller info
 //
 
@@ -71,12 +97,12 @@ enum D100AMtrDir {
 // Core 0 PWM 
 // define Motor pwm pins to output pwm and direction for each motor
 const uint LeftPwmPin =1;  // GPIO #1
-const uint LeftMtrPinA =2;  // GPIO control of Motor driver Hbridge
-const uint LeftMtrPinB =3;
+ const uint LeftMtrPinA =2;  // GPIO control of Motor driver Hbridge
+ const uint LeftMtrPinB =3;
 
 const uint RightPwmPin =8;  //GPIO #8
-const uint RightMtrPinA =9; // GPIO control of Motor driver Hbridge
-const uint RightMtrPinB =10;
+ const uint RightMtrPinA =9; // GPIO control of Motor driver Hbridge
+ const uint RightMtrPinB =10;
 
 const uint PWMTOP = 15624 ;  //top value for PWM counters 
 //Core 1
@@ -93,9 +119,9 @@ const int RightEncB =7; // interrupts to call the count up/down IRQ's
 
 //core 1
 // Position is 64 bits Signed !!
-volatile long long LeftPosition ;  // 64 bits
-volatile long long RightPosition ; //64 bits
-volatile u_int32_t Core1counter=0; 
+volatile int64_t LeftPosition ;  // 64 bits
+volatile int64_t RightPosition ; //64 bits
+volatile uint32_t Core1counter=0; 
 volatile uint32_t Core1State;  // state of core1
 
 
@@ -188,6 +214,8 @@ static void Left_pio_irq_handler (void) {
        uint32_t delta_ticsuS=(uint32_t)(currenttimeuS-LastLeftEncIntTimeuS); // compute delta tics since last encoder interrupr
        LastLeftEncIntTimeuS=currenttimeuS;  //save now as new time
        LeftVelocity = DistEncoderLeftuMDec/delta_ticsuS/1000; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
+        // Lock spinlock (without disabling interrupts since we are in the int handler and cannot be interrupted again on core1)
+        spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
 
 
          // test Which IRQ was raised by state machine on PIO0 sm1
@@ -202,6 +230,9 @@ static void Left_pio_irq_handler (void) {
         {//puts("leftPosition up\n");
             LeftPosition +=1;
         }
+        
+        spin_unlock_unsafe(spinlock_count) ;
+
         // clear both interrupts by setting to 1
         pio0_hw->irq = 3;
 }
@@ -228,6 +259,10 @@ static void Right_pio_irq_handler (void) {
        RightVelocity = DistEncoderRightuMDec/delta_ticsuS/1000; // divide by 100 to remove the 100X for significant digits  then convert to um/us = m/s
        // 1m/s  = 1e6m/
 
+       // Lock spinlock (without disabling interrupts since we are in the int handler and cannot be interrupted again on core1)
+        spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
+
+
 
 // test Which IRQ was raised by state machine on PIO sm1
 // this determines if we should count up or down
@@ -240,6 +275,9 @@ static void Right_pio_irq_handler (void) {
         {//puts("RightPosition up\n");
             RightPosition +=1;
         }
+
+        spin_unlock_unsafe(spinlock_count) ;
+
         // clear both interrupts by setting to 1
         pio1_hw->irq = 0x3;
 
@@ -332,14 +370,27 @@ void SetupPioEncoderRight( )  {
 
 void InitMotorABPins() {
 //gpio_set_dir(LeftPwmPin,true);
-gpio_set_drive_strength(LeftPwmPin,GPIO_DRIVE_STRENGTH_12MA);
-gpio_set_drive_strength(LeftMtrPinA,GPIO_DRIVE_STRENGTH_12MA);
-gpio_set_drive_strength(LeftMtrPinB,GPIO_DRIVE_STRENGTH_12MA);
-gpio_set_dir(LeftMtrPinA,true);
-gpio_set_dir(LeftMtrPinB,true);
+//gpio_set_drive_strength(LeftPwmPin,GPIO_DRIVE_STRENGTH_12MA);
+//gpio_set_drive_strength(LeftMtrPinA,GPIO_DRIVE_STRENGTH_12MA);
+//gpio_set_drive_strength(LeftMtrPinB,GPIO_DRIVE_STRENGTH_12MA);
+
+gpio_init(LeftMtrPinA);
+gpio_init(LeftMtrPinB);
+
+gpio_init(RightMtrPinA);
+gpio_init(RightMtrPinB);
+
+gpio_set_dir(LeftMtrPinA,GPIO_OUT);
+gpio_set_dir(LeftMtrPinB,GPIO_OUT);
+
+  gpio_put(LeftMtrPinA,1);
+  gpio_put(LeftMtrPinB,1);
 //gpio_set_dir(RightPwmPin,true);
-gpio_set_dir(RightMtrPinA,true);
-gpio_set_dir(RightMtrPinB,true);
+gpio_set_dir(RightMtrPinA,GPIO_OUT);
+gpio_set_dir(RightMtrPinB,GPIO_OUT);
+
+  gpio_put(RightMtrPinA,1);
+  gpio_put(RightMtrPinB,1);
     
 }
 
@@ -379,8 +430,10 @@ void InitMotorPWMPins () {
 
 // core 1 code here --- not managed by RTOS !!!
 void core1_entry(void) {
-   //toggle GPIO #1 to show core 0 is running
+ 
+corenum_1=get_core_num();
 
+//toggle GPIO #1 to show core 0 is running
 // run core 1 for
 // PWM Generators for Motor control
 // direction stop start control
@@ -402,14 +455,21 @@ pico_get_unique_board_id(FlashIdPtr); // used as sofware key
 // setup PWM Pin I/O
 InitMotorABPins();
 InitMotorPWMPins();
-gpio_set_dir(LeftPwmPin,true);
+
 
 Core1State =3;
 printf("Core 1 Started\n");
 while (1) {
 // set pwm I/O to defult
 // Pwm =0%  stopped dir =FWD
-Core1counter+=1;
+
+// no interrupts arused for cpu ctr,, just a sleep loop so no need to disable interrupts
+// Lock spinlock (without disabling interrupts since we are in the int handler and cannot be interrupted again on core1)
+spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
+Core1counter+=1; // foreground action,  interrupts do not touch Core1counter, but core0 reads it
+// this should be safe with AB lite bus stalls handling contention with only 1 writer and 1 reader 
+spin_unlock_unsafe(spinlock_count) ;
+
 sleep_ms(1000);
 //printf("Core 1 Running %d\n",Core1counter);
 // Start Encoder PIO and sampling of  position
@@ -420,6 +480,36 @@ sleep_ms(1000);
 }
 }
 
+// Safe access to core1 counter
+uint32_t get_Core1Counter() {
+spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
+uint32_t tmp= Core1counter;
+// this should be safe with AB lite bus stalls handling contention with only 1 writer and 1 reader 
+spin_unlock_unsafe(spinlock_count) ;
+ return(tmp);
+}
+
+// Safe access to LeftPosition 
+uint32_t get_LeftPosition() {
+spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
+int64_t tmp= LeftPosition;
+// this should be safe with AB lite bus stalls handling contention with only 1 writer and 1 reader 
+spin_unlock_unsafe(spinlock_count) ;
+ return(tmp);
+}
+
+// Safe access to LeftPosition 
+uint32_t get_RightPosition() {
+spin_lock_unsafe_blocking(spinlock_count) ; // get spinlock for core 1(write)-> core 0 (read) global access
+int64_t tmp= RightPosition;
+// this should be safe with AB lite bus stalls handling contention with only 1 writer and 1 reader 
+spin_unlock_unsafe(spinlock_count) ;
+ return(tmp);
+}
+
+
+
+
 
 //Core 0 --- Running under Free RTOS 
 //-----------------------------------------------------------
@@ -427,14 +517,19 @@ void led_task()
 {   int i=0;
     const uint LED_PIN = PICO_DEFAULT_LED_PIN;
     gpio_init(LED_PIN);
+    
     gpio_set_dir(LED_PIN, GPIO_OUT);
+  
+ 
     while (true) {
         gpio_put(LED_PIN, 1);
+    
         vTaskDelay(50);
         gpio_put(LED_PIN, 0);
+      
         vTaskDelay(50);
         //puts("Robowheels V0.1 \n");
-        //printf("count %d\n",i++);
+       // printf("count %d\n",i++);
     }
 }
 
@@ -611,13 +706,13 @@ if (cmdbuff[0]=='S' && cmdbuff[1]=='B' ) {
 // only use when VC=0 (velocity control =0 means off)
 // PW,Value
 if (cmdbuff[0]=='P' && cmdbuff[1]=='W' && cmdbuff[2]==',' ) {
-  printf("PWmset command received PW,decimal value received=%d\n",cmdbuff);
+  //printf("PWmset command received PW,decimal value received=%d\n",cmdbuff);
   long sval;
   char *end;
   sval=strtol(cmdbuff+3,&end,10);
   printf("val=%ld\n",sval);
 
-printf("Cmd buff length=%d",strlen(cmdbuff));
+printf("Cmd buff length=%d\n",strlen(cmdbuff));
 // set pwm block to velocity value
     uint Rightslice_num = pwm_gpio_to_slice_num(RightPwmPin);
     uint Leftslice_num = pwm_gpio_to_slice_num(LeftPwmPin);
@@ -642,16 +737,19 @@ printf("%02X", FlashIdPtr->id[4]);
 printf("%02X", FlashIdPtr->id[5]);
 printf("%02X", FlashIdPtr->id[6]);
 printf("%02X\n", FlashIdPtr->id[7]);
-printf("core1count=%d\n",Core1counter);
+printf("core1count=%d\n",get_Core1Counter());
 printf("left velocity %d\n",LeftVelocity);
 printf("right velocity %d\n",RightVelocity);
+printf("left Position %d\n",get_LeftPosition());
+printf("right Position %d\n",get_RightPosition());
+
 printf("DistEnccountRightuM= %f um/enc_cnt\n",(float) (DistEncoderRightuMDec)/1000.0);
 printf("DistEnccountLeftuM= %f um/enc_cnt\n",(float) (DistEncoderLeftuMDec)/1000.0);
 printf("comp=%d\n",comp);
 }
 
 
-}
+} 
 
 
 // wait for a cmd to appear in the cmd task
@@ -705,6 +803,14 @@ int main()
 {
     stdio_init_all();
 // create queue to hold 128 chars
+
+corenum_0=get_core_num();
+
+ // Claim and initialize a spinlock for core 0 
+    spinlock_num_count = spin_lock_claim_unused(true) ;
+    spinlock_count = spin_lock_init(spinlock_num_count) ;
+
+
 
  multicore_launch_core1(core1_entry);
 
