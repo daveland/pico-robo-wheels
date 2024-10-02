@@ -20,6 +20,16 @@
 #include "string.h"
 #include "pico-robo-wheels.pio.h"
 
+// LCD 
+#include "ssd1306.h"
+//#include "font.h"
+
+//#include "ssd1306.h"
+#include "image.h"
+#include "acme_5_outlines_font.h"
+#include "bubblesstandard_font.h"
+#include "crackers_font.h"
+#include "BMSPA_font.h"
 
 // Core 0 is managed by Freertos.  
 
@@ -161,7 +171,7 @@ QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 pico_unique_board_id_t * FlashIdPtr;  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
-char * PGMVersion = "0.2.2";
+char * PGMVersion = "0.2.5";
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
@@ -524,12 +534,12 @@ void led_task()
     while (true) {
         gpio_put(LED_PIN, 1);
     
-        vTaskDelay(50);
+        vTaskDelay(500);
         gpio_put(LED_PIN, 0);
       
-        vTaskDelay(50);
+        vTaskDelay(500);
         //puts("Robowheels V0.1 \n");
-       // printf("count %d\n",i++);
+       //printf("count %d\n",i++);
     }
 }
 
@@ -545,6 +555,7 @@ char ch;
     while (true) {
         // change this later to interrupt based, for now we poll  ....
         chint= getchar_timeout_us(0);
+
         if (chint != PICO_ERROR_TIMEOUT) {
             ch=(char)chint;
             //printf("A-CH usbread %d \n",ch);
@@ -552,7 +563,7 @@ char ch;
             while(!pflag){
             //printf("A-CH Charque add %d \n",ch);
               pflag=  xQueueSendToBack(charQueue,& ch,0); // if fails retry char 
-             // printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
+             //printf("A-CharQueue length %d \n", uxQueueMessagesWaiting(charQueue));
 
                  vTaskDelay(1); //delay 1ms
             }
@@ -797,12 +808,115 @@ char ch ;
     }
 
 
+// OLED functions
+// core 0 RTOS can only talk to OLED
+void OLED_setup_gpios(void) {
+    i2c_init(i2c1, 400000);
+    gpio_set_function(19, GPIO_FUNC_I2C); //OLED SCL1  
+    gpio_set_function(18, GPIO_FUNC_I2C); //OLED SDA1
+    gpio_pull_up(19);
+    gpio_pull_up(20);
+}
 
+void OLED_animation_Task() {
+    const char *words[]= {"SSD1306", "DISPLAY", "DRIVER"};
+const uint8_t *fonts[4]= {acme_font, bubblesstandard_font, crackers_font, BMSPA_font};
+const char *Speedwords[]= { "SPEED m/s","MtrL=32.58", "Mtrl=32.59"};
+    const uint8_t num_chars_per_disp[]={7,7,7,5};
+
+#define SLEEPTIME 25
+
+
+    ssd1306_t disp;
+    disp.external_vcc=false;
+    ssd1306_init(&disp, 128, 64, 0x3C, i2c1);
+    ssd1306_clear(&disp);
+
+    printf("ANIMATION!\n");
+
+    char buf[8];
+
+    for(;;) {
+        for(int y=0; y<31; ++y) {
+            ssd1306_draw_line(&disp, 0, y, 127, y);
+            ssd1306_show(&disp);
+            //sleep_ms(SLEEPTIME);
+            vTaskDelay(25); //delay
+            ssd1306_clear(&disp);
+        }
+
+        for(int y=0, i=1; y>=0; y+=i) {
+            ssd1306_draw_line(&disp, 0, 31-y, 127, 31+y);
+            ssd1306_draw_line(&disp, 0, 31+y, 127, 31-y);
+            ssd1306_show(&disp);
+            //sleep_ms(SLEEPTIME);
+            vTaskDelay(25); //delay
+            ssd1306_clear(&disp);
+            if(y==32) i=-1;
+        }
+
+        for(int i=0; i<sizeof(words)/sizeof(char *); ++i) {
+            ssd1306_draw_string(&disp, 8, 24, 2, words[i]);
+            ssd1306_show(&disp);
+            //sleep_ms(800);
+            vTaskDelay(800); //delay
+            ssd1306_clear(&disp);
+        }
+
+        for(int y=31; y<63; ++y) {
+            ssd1306_draw_line(&disp, 0, y, 127, y);
+            ssd1306_show(&disp);
+            //sleep_ms(SLEEPTIME);
+            vTaskDelay(25); //delay
+            ssd1306_clear(&disp);
+        }
+
+        // for(size_t font_i=0; font_i<sizeof(fonts)/sizeof(fonts[0]); ++font_i) {
+        //     uint8_t c=32;
+        //     while(c<=126) {
+        //         uint8_t i=0;
+        //         for(; i<num_chars_per_disp[font_i]; ++i) {
+        //             if(c>126)
+        //                 break;
+        //             buf[i]=c++;
+        //         }
+        //         buf[i]=0;
+
+        //         ssd1306_draw_string_with_font(&disp, 8, 24, 2, fonts[font_i], buf);
+        //         ssd1306_show(&disp);
+        //         //sleep_ms(800);
+        //         vTaskDelay(800); //delay
+        //         ssd1306_clear(&disp);
+        //     }
+        // }
+        
+        ssd1306_clear(&disp);
+         ssd1306_bmp_show_image(&disp, image_data, image_size);
+         ssd1306_show(&disp);
+         //sleep_ms(2000);
+         vTaskDelay(2000); //delay
+
+/// my message
+        ssd1306_clear(&disp);
+        ssd1306_draw_string(&disp, 8, 0, 2, Speedwords[0]);
+    for(int i=1; i<sizeof(Speedwords)/sizeof(char *); ++i) {
+            ssd1306_draw_string(&disp, 8, 4+(16*i), 2, Speedwords[i]);
+    }
+            ssd1306_show(&disp);
+            //sleep_ms(800);
+            vTaskDelay(4800); //delay
+            ssd1306_clear(&disp);
+        
+    }
+}
 
 int main()
 {
     stdio_init_all();
 // create queue to hold 128 chars
+
+OLED_setup_gpios();
+//OLED_animation();
 
 corenum_0=get_core_num();
 
@@ -820,6 +934,7 @@ cmdQueue = xQueueCreate( 100, sizeof( char ) ); //10 cmd avalible  buffer, one C
     xTaskCreate(led_task, "LED_Task", 256, NULL, 1, NULL);
     xTaskCreate(USBSerial_Inputtask, "USBSerial_Inputtask", 256, NULL, 3, NULL);
     xTaskCreate(InputCmd_task, "InputCmd_task", 256, NULL, 2, NULL);
+    xTaskCreate(OLED_animation_Task, "OLED_Task", 256, NULL, 1, NULL);
     vTaskStartScheduler();
     puts("Start scheduler\n");
     puts("Robowheels V0.1 \n");
