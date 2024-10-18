@@ -107,12 +107,31 @@
 #define configNUMBER_OF_CORES                   1
 #define configTICK_CORE                         0
 #define configRUN_MULTIPLE_PRIORITIES           1
-#define configUSE_CORE_AFFINITY                 1
+#define configUSE_CORE_AFFINITY                 0
+#define configNUM_CORES configNUMBER_OF_CORES  //SDK still relies on this
 #endif
 
 /* RP2040 specific */
 #define configSUPPORT_PICO_SYNC_INTEROP         1
 #define configSUPPORT_PICO_TIME_INTEROP         1
+/*RP2350 Specific */
+/*
+#define configENABLE_FPU 1 // for rp2350 FPU
+#define configENABLE_MPU 0
+#define configENABLE_TRUSTZONE 0
+#define configRUN_FREERTOS_SECURE_ONLY 1
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY 16
+#define configCPU_CLOCK_HZ 150000000
+*/
+
+#if 1
+#define configENABLE_MPU                        0
+#define configENABLE_TRUSTZONE                  0
+#define configRUN_FREERTOS_SECURE_ONLY          1
+#define configENABLE_FPU                        1
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY    16
+#define configCPU_CLOCK_HZ                      150000000
+#endif
 
 #include <assert.h>
 /* Define to trap errors during development. */
