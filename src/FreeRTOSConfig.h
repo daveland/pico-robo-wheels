@@ -114,6 +114,16 @@
 #define configSUPPORT_PICO_SYNC_INTEROP         1
 #define configSUPPORT_PICO_TIME_INTEROP         1
 
+/*RP2350 Specific */
+#define configENABLE_FPU 1 // for rp2350 FPU
+#define configENABLE_MPU 0
+#define configENABLE_TRUSTZONE 0
+#define configRUN_FREERTOS_SECURE_ONLY 1
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY 16
+#define configCPU_CLOCK_HZ 150000000
+/*#define configPICO_USE_SW_SPIN_LOCK 0 */
+
+
 #include <assert.h>
 /* Define to trap errors during development. */
 #define configASSERT(x)                         assert(x)

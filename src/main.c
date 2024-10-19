@@ -171,7 +171,7 @@ QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 pico_unique_board_id_t * FlashIdPtr;  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
-char * PGMVersion = "0.2.5";
+char * PGMVersion = "0.2.7";
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
