@@ -171,7 +171,7 @@ QueueHandle_t cmdQueue; // when char queue forms a command this triggers parsing
 
 pico_unique_board_id_t * FlashIdPtr;  // 8 byte flash id buffer, unique per Pico Flash chip, used fpt liscensing
 
-char * PGMVersion = "0.2.7";
+char * PGMVersion = "0.2.8";
 
 // Floating Point used here ONCE on bootup
 void ComputeEncoderDistances() {
@@ -837,6 +837,17 @@ const char *Speedwords[]= { "SPEED m/s","MtrL=32.58", "Mtrl=32.59"};
     char buf[8];
 
     for(;;) {
+
+            ssd1306_draw_string(&disp, 8, 10, 2, "FW REV:");
+            ssd1306_draw_string(&disp, 8, 26, 2, PGMVersion);
+            ssd1306_show(&disp);
+            //sleep_ms(800);
+            vTaskDelay(2800); //delay
+            ssd1306_clear(&disp);
+        
+
+
+
         for(int y=0; y<31; ++y) {
             ssd1306_draw_line(&disp, 0, y, 127, y);
             ssd1306_show(&disp);
